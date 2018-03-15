@@ -13,5 +13,6 @@ This pre-build binaries are tested for Ubuntu 14.04 and 16.04. We did not test t
 
 ### Dependent libraries
 
-- libssl-dev > 1.0.1f
+- libssl > 1.0.1f
+- libssl-dev
 - libcrypto++
