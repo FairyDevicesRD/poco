@@ -13,6 +13,6 @@ Shared libraries in `/lib` are built for Linux x86_64 architecture. If you want 
 
 This pre-build binaries are tested for Ubuntu 14.04 and 16.04. We did not test them for other linux distributions.
 
-### delendent libraries
+### Dependent libraries
 
 libssl-dev > 1.0.1f
