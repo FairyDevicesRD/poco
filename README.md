@@ -16,4 +16,3 @@ This pre-build binaries are tested for Ubuntu 14.04 and 16.04. We did not test t
 - libssl > 1.0.0
 - libssl-dev
 - libcrypto++
-- libcrypto++-dev
