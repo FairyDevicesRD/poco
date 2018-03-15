@@ -9,4 +9,4 @@ Poco C++ Libraries
 
 https://github.com/pocoproject/poco
 
-Shared libraries in `/lib` are built for Linux x86_64 architecture. If you want to use newer version of Poco, see other branches. Applied patches listed in `/patches` (not all patches in listed in the directory for commercial reason.)
+Shared libraries in `/lib` are built for Linux x86_64 architecture. If you want to use newer version of Poco, see other branches. Applied patches are included in `/patches`. Not all patches are included in the directory for commercial reasons, but all patches which affects external interface of the library are included.
