@@ -1,0 +1,223 @@
+diff -ur poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/HTTPServer.h poco-1.6.0-all/Net/include/Poco/Net/HTTPServer.h
+--- poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/HTTPServer.h	2015-03-17 23:07:49.625891512 +0900
++++ poco-1.6.0-all/Net/include/Poco/Net/HTTPServer.h	2015-03-17 23:35:26.154105804 +0900
+@@ -24,6 +24,7 @@
+ #include "Poco/Net/TCPServer.h"
+ #include "Poco/Net/HTTPRequestHandlerFactory.h"
+ #include "Poco/Net/HTTPServerParams.h"
++#include "Poco/Logger.h"
+ 
+ 
+ namespace Poco {
+@@ -81,6 +82,12 @@
+ 		///
+ 		/// New threads are taken from the given thread pool.
+ 
++	HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, Poco::UInt16 portNumber = 80, HTTPServerParams::Ptr pParams = new HTTPServerParams);
++
++	HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, const ServerSocket& socket, HTTPServerParams::Ptr pParams);
++
++	HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, Poco::ThreadPool& threadPool, const ServerSocket& socket, HTTPServerParams::Ptr pParams);
++
+ 	~HTTPServer();
+ 		/// Destroys the HTTPServer and its HTTPRequestHandlerFactory.
+ 
+diff -ur poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/TCPServer.h poco-1.6.0-all/Net/include/Poco/Net/TCPServer.h
+--- poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/TCPServer.h	2015-03-17 23:07:49.621891491 +0900
++++ poco-1.6.0-all/Net/include/Poco/Net/TCPServer.h	2015-03-18 01:11:11.438595119 +0900
+@@ -27,6 +27,7 @@
+ #include "Poco/Runnable.h"
+ #include "Poco/Thread.h"
+ #include "Poco/ThreadPool.h"
++#include "Poco/Logger.h"
+ 
+ 
+ namespace Poco {
+@@ -116,6 +117,12 @@
+ 		///
+ 		/// New threads are taken from the given thread pool.
+ 
++	TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, Poco::UInt16 portNumber = 0, TCPServerParams::Ptr pParams = 0);
++
++	TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, const ServerSocket& socket, TCPServerParams::Ptr pParams = 0);
++
++	TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, Poco::ThreadPool& threadPool, const ServerSocket& socket, TCPServerParams::Ptr pParams = 0);
++
+ 	virtual ~TCPServer();
+ 		/// Destroys the TCPServer and its TCPServerConnectionFactory.
+ 
+@@ -185,6 +192,7 @@
+ 	TCPServerDispatcher* _pDispatcher;
+ 	Poco::Thread         _thread;
+ 	bool                 _stopped;
++	Poco::Logger& _logger;
+ };
+ 
+ 
+diff -ur poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/TCPServerDispatcher.h poco-1.6.0-all/Net/include/Poco/Net/TCPServerDispatcher.h
+--- poco-1.6.0-all-2patches_applied/Net/include/Poco/Net/TCPServerDispatcher.h	2015-03-17 23:07:49.621891491 +0900
++++ poco-1.6.0-all/Net/include/Poco/Net/TCPServerDispatcher.h	2015-03-18 01:05:16.612835640 +0900
+@@ -28,6 +28,7 @@
+ #include "Poco/NotificationQueue.h"
+ #include "Poco/ThreadPool.h"
+ #include "Poco/Mutex.h"
++#include "Poco/Logger.h"
+ 
+ 
+ namespace Poco {
+@@ -57,7 +58,7 @@
+ 	void run();
+ 		/// Runs the dispatcher.
+ 		
+-	void enqueue(const StreamSocket& socket);
++	void enqueue(const StreamSocket& socket, Poco::Logger& logger);
+ 		/// Queues the given socket connection.
+ 
+ 	void stop();
+
+diff -ur poco-1.6.0-all-2patches_applied/Net/src/HTTPServer.cpp poco-1.6.0-all/Net/src/HTTPServer.cpp
+--- poco-1.6.0-all-2patches_applied/Net/src/HTTPServer.cpp	2015-03-17 23:07:49.629891540 +0900
++++ poco-1.6.0-all/Net/src/HTTPServer.cpp	2015-03-18 02:03:36.090188603 +0900
+@@ -43,6 +43,22 @@
+ }
+ 
+ 
++HTTPServer::HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, Poco::UInt16 portNumber, HTTPServerParams::Ptr pParams):
++  TCPServer(new HTTPServerConnectionFactory(pParams, pFactory), logger, portNumber, pParams),
++  _pFactory(pFactory){}
++
++
++HTTPServer::HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, const ServerSocket& socket, HTTPServerParams::Ptr pParams):
++  TCPServer(new HTTPServerConnectionFactory(pParams, pFactory), logger, socket, pParams),
++  _pFactory(pFactory){}
++
++
++HTTPServer::HTTPServer(HTTPRequestHandlerFactory::Ptr pFactory, Poco::Logger& logger, Poco::ThreadPool& threadPool, const ServerSocket& socket, HTTPServerParams::Ptr pParams):
++  TCPServer(new HTTPServerConnectionFactory(pParams, pFactory), logger, threadPool, socket, pParams),
++  _pFactory(pFactory){}
++
++
++
+ HTTPServer::~HTTPServer()
+ {
+ }
+diff -ur poco-1.6.0-all-2patches_applied/Net/src/TCPServer.cpp poco-1.6.0-all/Net/src/TCPServer.cpp
+--- poco-1.6.0-all-2patches_applied/Net/src/TCPServer.cpp	2015-03-17 23:07:49.629891540 +0900
++++ poco-1.6.0-all/Net/src/TCPServer.cpp	2015-03-18 02:06:02.626915249 +0900
+@@ -33,7 +33,8 @@
+ TCPServer::TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::UInt16 portNumber, TCPServerParams::Ptr pParams):
+ 	_socket(ServerSocket(portNumber)),
+ 	_thread(threadName(_socket)),
+-	_stopped(true)
++	_stopped(true),
++	_logger(Poco::Logger::root())
+ {	
+ 	Poco::ThreadPool& pool = Poco::ThreadPool::defaultPool();
+ 	if (pParams)
+@@ -49,7 +50,8 @@
+ TCPServer::TCPServer(TCPServerConnectionFactory::Ptr pFactory, const ServerSocket& socket, TCPServerParams::Ptr pParams):
+ 	_socket(socket),
+ 	_thread(threadName(socket)),
+-	_stopped(true)
++	_stopped(true),
++	_logger(Poco::Logger::root())
+ {
+ 	Poco::ThreadPool& pool = Poco::ThreadPool::defaultPool();
+ 	if (pParams)
+@@ -65,10 +67,50 @@
+ 	_socket(socket),
+ 	_pDispatcher(new TCPServerDispatcher(pFactory, threadPool, pParams)),
+ 	_thread(threadName(socket)),
+-	_stopped(true)
++	_stopped(true),
++	_logger(Poco::Logger::root())
+ {
+ }
+ 
++TCPServer::TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, Poco::UInt16 portNumber, TCPServerParams::Ptr pParams):
++	_socket(ServerSocket(portNumber)),
++	_thread(threadName(_socket)),
++	_stopped(true),
++	_logger(logger)
++{	
++	Poco::ThreadPool& pool = Poco::ThreadPool::defaultPool();
++	if (pParams)
++	{
++		int toAdd = pParams->getMaxThreads() - pool.capacity();
++		if (toAdd > 0) pool.addCapacity(toAdd);
++	}
++	_pDispatcher = new TCPServerDispatcher(pFactory, pool, pParams);
++	
++}
++
++
++TCPServer::TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, const ServerSocket& socket, TCPServerParams::Ptr pParams):
++	_socket(socket),
++	_thread(threadName(socket)),
++	_stopped(true),
++	_logger(logger)
++{
++	Poco::ThreadPool& pool = Poco::ThreadPool::defaultPool();
++	if (pParams)
++	{
++		int toAdd = pParams->getMaxThreads() - pool.capacity();
++		if (toAdd > 0) pool.addCapacity(toAdd);
++	}
++	_pDispatcher = new TCPServerDispatcher(pFactory, pool, pParams);
++}
++
++
++TCPServer::TCPServer(TCPServerConnectionFactory::Ptr pFactory, Poco::Logger& logger, Poco::ThreadPool& threadPool, const ServerSocket& socket, TCPServerParams::Ptr pParams):
++	_socket(socket),
++	_pDispatcher(new TCPServerDispatcher(pFactory, threadPool, pParams)),
++	_thread(threadName(socket)),
++	_stopped(true),
++	_logger(logger){}
+ 
+ TCPServer::~TCPServer()
+ {
+@@ -122,7 +164,7 @@
+ 				StreamSocket ss = _socket.acceptConnection();
+ 				// enabe nodelay per default: OSX really needs that
+ 				ss.setNoDelay(true);
+-				_pDispatcher->enqueue(ss);
++				_pDispatcher->enqueue(ss, _logger);
+ 			}
+ 			catch (Poco::Exception& exc)
+ 			{
+diff -ur poco-1.6.0-all-2patches_applied/Net/src/TCPServerDispatcher.cpp poco-1.6.0-all/Net/src/TCPServerDispatcher.cpp
+--- poco-1.6.0-all-2patches_applied/Net/src/TCPServerDispatcher.cpp	2015-03-17 23:07:49.629891540 +0900
++++ poco-1.6.0-all/Net/src/TCPServerDispatcher.cpp	2015-03-18 01:09:01.269949655 +0900
+@@ -134,7 +134,7 @@
+ }
+ 
+ 	
+-void TCPServerDispatcher::enqueue(const StreamSocket& socket)
++void TCPServerDispatcher::enqueue(const StreamSocket& socket, Poco::Logger& logger)
+ {
+ 	FastMutex::ScopedLock lock(_mutex);
+ 
+@@ -147,6 +147,7 @@
+ 			{
+ 				_threadPool.startWithPriority(_pParams->getThreadPriority(), *this, threadName);
+ 				++_currentThreads;
++				logger.information("TCP connection begin, currentConnections = %d, totalConnections = %d", _currentConnections, _totalConnections);
+ 			}
+ 			catch (Poco::Exception&)
+ 			{
+@@ -154,10 +155,15 @@
+ 				// and a new thread might be available later.
+ 			}
+ 		}
++		else
++		{
++		  logger.information("TCP connection queued, queue size = %d",_queue.size());
++		}
+ 	}
+ 	else
+ 	{
+ 		++_refusedConnections;
++		logger.information("TCP connection reset. refusedConnections = %d", _refusedConnections);
+ 	}
+ }
+ 

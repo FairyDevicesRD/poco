@@ -1,0 +1,222 @@
+diff -ur poco-1.6.0/Net/include/Poco/Net/SocketImpl.h poco-1.6.0-modify/Net/include/Poco/Net/SocketImpl.h
+--- poco-1.6.0/Net/include/Poco/Net/SocketImpl.h	2014-12-22 17:08:24.000000000 +0900
++++ poco-1.6.0-modify/Net/include/Poco/Net/SocketImpl.h	2014-12-26 02:36:36.000000000 +0900
+@@ -25,6 +25,7 @@
+ #include "Poco/Net/SocketAddress.h"
+ #include "Poco/RefCountedObject.h"
+ #include "Poco/Timespan.h"
++#include <vector>
+ 
+ 
+ namespace Poco {
+@@ -136,6 +137,7 @@
+ 		/// Certain socket implementations may also return a negative
+ 		/// value denoting a certain condition.
+ 	
++	virtual int receiveBytes(std::vector<char> &buffer, int flags = 0);
+ 	virtual int receiveBytes(void* buffer, int length, int flags = 0);
+ 		/// Receives data from the socket and stores it
+ 		/// in buffer. Up to length bytes are received.
+diff -ur poco-1.6.0/Net/include/Poco/Net/WebSocket.h poco-1.6.0-modify/Net/include/Poco/Net/WebSocket.h
+--- poco-1.6.0/Net/include/Poco/Net/WebSocket.h	2014-12-22 17:08:24.000000000 +0900
++++ poco-1.6.0-modify/Net/include/Poco/Net/WebSocket.h	2014-12-26 02:16:14.000000000 +0900
+@@ -23,7 +23,7 @@
+ #include "Poco/Net/Net.h"
+ #include "Poco/Net/StreamSocket.h"
+ #include "Poco/Net/HTTPCredentials.h"
+-
++#include <vector>
+ 
+ namespace Poco {
+ namespace Net {
+@@ -203,6 +203,8 @@
+ 		/// Certain socket implementations may also return a negative
+ 		/// value denoting a certain condition.
+ 
++	int receiveFrame(std::vector<char>& buffer, int& flags);
++
+ 	int receiveFrame(void* buffer, int length, int& flags);
+ 		/// Receives a frame from the socket and stores it
+ 		/// in buffer. Up to length bytes are received. If
+diff -ur poco-1.6.0/Net/include/Poco/Net/WebSocketImpl.h poco-1.6.0-modify/Net/include/Poco/Net/WebSocketImpl.h
+--- poco-1.6.0/Net/include/Poco/Net/WebSocketImpl.h	2014-12-22 17:08:24.000000000 +0900
++++ poco-1.6.0-modify/Net/include/Poco/Net/WebSocketImpl.h	2014-12-26 02:16:06.000000000 +0900
+@@ -22,7 +22,7 @@
+ 
+ #include "Poco/Net/StreamSocketImpl.h"
+ #include "Poco/Random.h"
+-
++#include <vector>
+ 
+ namespace Poco {
+ namespace Net {
+@@ -40,6 +40,7 @@
+ 	virtual int sendBytes(const void* buffer, int length, int flags);
+ 		/// Sends a WebSocket protocol frame.
+ 		
++	virtual int receiveBytes(std::vector<char> &buffer, int flags);
+ 	virtual int receiveBytes(void* buffer, int length, int flags);
+ 		/// Receives a WebSocket protocol frame.
+ 		
+diff -ur poco-1.6.0/Net/src/SocketImpl.cpp poco-1.6.0-modify/Net/src/SocketImpl.cpp
+--- poco-1.6.0/Net/src/SocketImpl.cpp	2014-12-22 17:08:25.000000000 +0900
++++ poco-1.6.0-modify/Net/src/SocketImpl.cpp	2014-12-26 02:35:46.000000000 +0900
+@@ -282,6 +282,36 @@
+ }
+ 
+ 
++int SocketImpl::receiveBytes(std::vector<char> &buffer, int flags)
++{
++#if defined(POCO_BROKEN_TIMEOUTS)
++	if (_recvTimeout.totalMicroseconds() != 0)
++	{
++		if (!poll(_recvTimeout, SELECT_READ))
++			throw TimeoutException();
++	}
++#endif
++	
++	int rc;
++	do
++	{
++		if (_sockfd == POCO_INVALID_SOCKET) throw InvalidSocketException();
++		rc = ::recv(_sockfd, reinterpret_cast<char*>(&buffer[0]), buffer.size(), flags);
++	}
++	while (_blocking && rc < 0 && lastError() == POCO_EINTR);
++	if (rc < 0) 
++	{
++		int err = lastError();
++		if (err == POCO_EAGAIN && !_blocking)
++			;
++		else if (err == POCO_EAGAIN || err == POCO_ETIMEDOUT)
++			throw TimeoutException(err);
++		else
++			error(err);
++	}
++	return rc;
++}
++
+ int SocketImpl::receiveBytes(void* buffer, int length, int flags)
+ {
+ #if defined(POCO_BROKEN_TIMEOUTS)
+diff -ur poco-1.6.0/Net/src/WebSocket.cpp poco-1.6.0-modify/Net/src/WebSocket.cpp
+--- poco-1.6.0/Net/src/WebSocket.cpp	2014-12-22 17:08:25.000000000 +0900
++++ poco-1.6.0-modify/Net/src/WebSocket.cpp	2014-12-26 02:20:59.000000000 +0900
+@@ -113,6 +113,12 @@
+ 	return n;
+ }
+ 
++int WebSocket::receiveFrame(std::vector<char>& buffer, int& flags)
++{
++	int n = static_cast<WebSocketImpl*>(impl())->receiveBytes(buffer, 0);
++	flags = static_cast<WebSocketImpl*>(impl())->frameFlags();
++	return n;
++}
+ 	
+ WebSocket::Mode WebSocket::mode() const
+ {
+diff -ur poco-1.6.0/Net/src/WebSocketImpl.cpp poco-1.6.0-modify/Net/src/WebSocketImpl.cpp
+--- poco-1.6.0/Net/src/WebSocketImpl.cpp	2014-12-22 17:08:25.000000000 +0900
++++ poco-1.6.0-modify/Net/src/WebSocketImpl.cpp	2014-12-26 05:34:48.000000000 +0900
+@@ -103,6 +103,102 @@
+ 	return length;
+ }
+ 
++
++int WebSocketImpl::receiveBytes(std::vector<char>& buffer, int)
++{
++        int length = buffer.size();
++	char header[MAX_HEADER_LENGTH];
++	int n = receiveNBytes(header, 2);
++	if (n <= 0)
++	{
++		_frameFlags = 0;
++		return n;
++	}
++	poco_assert (n == 2);
++	Poco::UInt8 lengthByte = static_cast<Poco::UInt8>(header[1]);
++	int maskOffset = 0;
++	if (lengthByte & FRAME_FLAG_MASK) maskOffset += 4;
++	lengthByte &= 0x7f;
++	if (lengthByte > 0 || maskOffset > 0)
++	{
++		if (lengthByte + 2 + maskOffset < MAX_HEADER_LENGTH)
++		{
++			n = receiveNBytes(header + 2, lengthByte + maskOffset);
++		}
++		else
++		{
++			n = receiveNBytes(header + 2, MAX_HEADER_LENGTH - 2);
++		}
++		if (n <= 0) throw WebSocketException("Incomplete header received", WebSocket::WS_ERR_INCOMPLETE_FRAME);
++		n += 2;
++	}
++	Poco::MemoryInputStream istr(header, n);
++	Poco::BinaryReader reader(istr, Poco::BinaryReader::NETWORK_BYTE_ORDER);
++	Poco::UInt8 flags;
++	char mask[4];
++	reader >> flags >> lengthByte;
++	_frameFlags = flags;
++	int payloadLength = 0;
++	int payloadOffset = 2;
++	if ((lengthByte & 0x7f) == 127)
++	{
++		Poco::UInt64 l;
++		reader >> l;
++		if (l > length){
++		  buffer.resize(l);
++		  //throw WebSocketException(Poco::format("Insufficient buffer for payload size %Lu", l), WebSocket::WS_ERR_PAYLOAD_TOO_BIG);
++		}
++		payloadLength = static_cast<int>(l);
++		payloadOffset += 8;
++	}
++	else if ((lengthByte & 0x7f) == 126)
++	{
++		Poco::UInt16 l;
++		reader >> l;
++		if (l > length){
++		  buffer.resize(l);
++		  //throw WebSocketException(Poco::format("Insufficient buffer for payload size %hu", l), WebSocket::WS_ERR_PAYLOAD_TOO_BIG);
++		}
++		payloadLength = static_cast<int>(l);
++		payloadOffset += 2;
++	}
++	else
++	{
++		Poco::UInt8 l = lengthByte & 0x7f;
++		if (l > length){
++		  buffer.resize(l);
++		  //throw WebSocketException(Poco::format("Insufficient buffer for payload size %u", unsigned(l)), WebSocket::WS_ERR_PAYLOAD_TOO_BIG);
++		}
++		payloadLength = static_cast<int>(l);
++	}
++	if (lengthByte & FRAME_FLAG_MASK)
++	{
++		reader.readRaw(mask, 4);
++		payloadOffset += 4;
++	}
++	int received = 0;
++	if (payloadOffset < n)
++	{
++		std::memcpy(&buffer[0], header + payloadOffset, n - payloadOffset);
++		received = n - payloadOffset;
++	}
++	if (received < payloadLength)
++	{
++		n = receiveNBytes(reinterpret_cast<char*>(&buffer[0]) + received, payloadLength - received);
++		if (n <= 0) throw WebSocketException("Incomplete frame received", WebSocket::WS_ERR_INCOMPLETE_FRAME);
++		received += n;
++	}
++	if (lengthByte & FRAME_FLAG_MASK)
++	{
++		char* p = reinterpret_cast<char*>(&buffer[0]);
++		for (int i = 0; i < received; i++)
++		{
++			p[i] ^= mask[i % 4];
++		}
++	}
++	return received;
++}
++
+ 	
+ int WebSocketImpl::receiveBytes(void* buffer, int length, int)
+ {
