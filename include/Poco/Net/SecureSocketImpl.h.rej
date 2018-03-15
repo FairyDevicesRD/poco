@@ -1,0 +1,11 @@
+--- NetSSL_OpenSSL/include/Poco/Net/SecureSocketImpl.h	2014-12-22 17:04:52.000000000 +0900
++++ NetSSL_OpenSSL/include/Poco/Net/SecureSocketImpl.h	2015-03-12 20:36:20.790650090 +0900
+@@ -181,6 +181,8 @@
+ 	bool sessionWasReused();
+ 		/// Returns true iff a reused session was negotiated during
+ 		/// the handshake.
++
++	int _renegotiations;
+ 		
+ protected:
+ 	void acceptSSL();

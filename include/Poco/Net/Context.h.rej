@@ -1,0 +1,20 @@
+--- NetSSL_OpenSSL/include/Poco/Net/Context.h	2014-12-22 17:04:52.000000000 +0900
++++ NetSSL_OpenSSL/include/Poco/Net/Context.h	2015-03-12 20:33:56.937936779 +0900
+@@ -29,7 +29,6 @@
+ #include <openssl/ssl.h>
+ #include <cstdlib>
+ 
+-
+ namespace Poco {
+ namespace Net {
+ 
+@@ -56,7 +55,8 @@
+ 		TLSV1_1_CLIENT_USE, /// Context is used by a client requiring TLSv1.1 (OpenSSL 1.0.0 or newer).
+ 		TLSV1_1_SERVER_USE, /// Context is used by a server requiring TLSv1.1 (OpenSSL 1.0.0 or newer).
+ 		TLSV1_2_CLIENT_USE, /// Context is used by a client requiring TLSv1.2 (OpenSSL 1.0.1 or newer).
+-		TLSV1_2_SERVER_USE  /// Context is used by a server requiring TLSv1.2 (OpenSSL 1.0.1 or newer).
++		TLSV1_2_SERVER_USE, /// Context is used by a server requiring TLSv1.2 (OpenSSL 1.0.1 or newer).
++		TLSVALL_SERVER_USE  /// Context is used by a server TLSv1,1.1,1.2. Not SSLv3.
+ 	};
+ 	
+ 	enum VerificationMode 
